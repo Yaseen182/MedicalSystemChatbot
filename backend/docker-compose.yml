@@ -1,0 +1,73 @@
+version: '3.9'
+
+services:
+  # ── Node.js Backend ────────────────────────────────────────
+  api:
+    build: .
+    container_name: medai-api
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://medai_user:medai_pass@postgres:5432/medai_db
+      - REDIS_URL=redis://redis:6379
+      - CHROMA_URL=http://chromadb:8000
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+      - chromadb
+    restart: unless-stopped
+    networks:
+      - medai-net
+
+  # ── PostgreSQL ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: medai-postgres
+    environment:
+      POSTGRES_USER: medai_user
+      POSTGRES_PASSWORD: medai_pass
+      POSTGRES_DB: medai_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/config/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - medai-net
+
+  # ── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: medai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - medai-net
+
+  # ── ChromaDB ───────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: medai-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    restart: unless-stopped
+    networks:
+      - medai-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  chroma_data:
+
+networks:
+  medai-net:
+    driver: bridge
