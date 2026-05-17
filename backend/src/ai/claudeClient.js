@@ -1,61 +1,61 @@
 /**
- * DeepSeek AI Client
- * DeepSeek's API is OpenAI-compatible — we use the openai SDK pointed at DeepSeek's base URL.
+ * DeepSeek AI Client + Medical-Grade Embedding Service
+ *
+ * Embeddings use @xenova/transformers with BGE-M3 model:
+ * - 1024-dim vs 384-dim (MiniLM) — richer representation
+ * - Better at medical terminology and clinical language
+ * - Still runs fully locally, no API needed
+ *
+ * Install: npm install @xenova/transformers
  */
 
 const OpenAI = require('openai');
 const config = require('../config');
 const logger = require('../utils/logger');
 
+// ── DeepSeek client ───────────────────────────────────────────────────────────
 const deepseek = new OpenAI({
   apiKey: config.deepseek.apiKey,
   baseURL: 'https://api.deepseek.com',
 });
 
-/**
- * Extract text content from a DeepSeek response message.
- *
- * IMPORTANT — two separate fields:
- *   message.reasoning_content  = internal chain-of-thought (NEVER show to users)
- *   message.content            = the actual final answer  (always use this)
- *
- * When content is empty but reasoning_content exists it means the model ran out
- * of token budget mid-thought. We return '' to trigger a retry with more tokens.
- *
- * @param {object} message - response.choices[0].message
- * @returns {string}
- */
+// ── Embedding pipeline (lazy-loaded, singleton) ───────────────────────────────
+let _pipeline = null;
+
+const getEmbeddingPipeline = async () => {
+  if (_pipeline) return _pipeline;
+
+  const { pipeline, env } = await import('@xenova/transformers');
+
+  env.cacheDir = require('path').join(__dirname, '../../.cache/transformers');
+
+  // BGE-M3: better than MiniLM for medical/technical text
+  // Downloads ~570MB first time, cached after that
+  logger.info('Loading embedding model (BGE-M3) — first run downloads ~570MB...');
+  _pipeline = await pipeline('feature-extraction', 'Xenova/bge-m3');
+  logger.info('Embedding model BGE-M3 ready ✓ (1024-dim)');
+
+  return _pipeline;
+};
+
+// ── Extract content from DeepSeek response ────────────────────────────────────
 const extractContent = (message) => {
   if (message.content && message.content.trim().length > 0) {
     return message.content.trim();
   }
-
   if (message.reasoning_content && message.reasoning_content.trim().length > 0) {
-    logger.warn(
-      'DeepSeek: content is empty but reasoning_content exists — ' +
-      'model likely hit token limit mid-thought. Returning empty to trigger retry.'
-    );
+    logger.warn('DeepSeek: content empty — model hit token limit. Triggering retry.');
     return '';
   }
-
-  logger.warn('DeepSeek: fully empty response received', { message });
+  logger.warn('DeepSeek: fully empty response', { message });
   return '';
 };
 
-/**
- * Send a chat conversation to DeepSeek and get a text response.
- *
- * @param {Array<{role:'user'|'assistant', content:string}>} messages
- * @param {string} systemPrompt
- * @param {number} maxTokens
- * @returns {Promise<string>}
- */
+// ── Chat ──────────────────────────────────────────────────────────────────────
 const chat = async (messages, systemPrompt, maxTokens = 1024) => {
   const model = config.deepseek.model;
   logger.debug(`DeepSeek request — ${messages.length} messages, model: ${model}`);
 
-  // deepseek-reasoner does NOT support the 'system' role.
-  // Merge the system prompt into the first user message instead.
   const isReasoningModel = model.includes('reasoner') || model.includes('flash');
 
   let formattedMessages;
@@ -75,8 +75,6 @@ const chat = async (messages, systemPrompt, maxTokens = 1024) => {
     ];
   }
 
-  // Reasoning models consume tokens for internal thinking BEFORE writing the answer.
-  // Boost the budget so the model always has room to write the actual reply.
   const effectiveMaxTokens = isReasoningModel ? Math.max(maxTokens, 2000) : maxTokens;
 
   const response = await deepseek.chat.completions.create({
@@ -90,7 +88,7 @@ const chat = async (messages, systemPrompt, maxTokens = 1024) => {
   logger.debug(`DeepSeek finish_reason: ${finishReason} | usage: ${JSON.stringify(response.usage)}`);
 
   if (finishReason === 'length') {
-    logger.warn('DeepSeek: hit max_tokens limit — response may be truncated or empty');
+    logger.warn('DeepSeek: hit max_tokens limit — response may be truncated');
   }
 
   const message = response.choices[0]?.message;
@@ -100,35 +98,54 @@ const chat = async (messages, systemPrompt, maxTokens = 1024) => {
   }
 
   const content = extractContent(message);
-
   if (!content) {
-    logger.warn('DeepSeek: extracted content is empty', {
-      model,
-      finishReason,
-      usage: response.usage,
-    });
+    logger.warn('DeepSeek: extracted content is empty', { model, finishReason, usage: response.usage });
   }
 
   return content;
 };
 
+// ── Semantic Embedding (BGE-M3) ───────────────────────────────────────────────
 /**
- * Pseudo-embedding (512-dim) — DeepSeek doesn't expose an embeddings endpoint yet.
- * Replace with a real embeddings service in production.
+ * Generate a 1024-dim semantic embedding using BGE-M3.
+ * BGE-M3 uses a special query prefix for better retrieval accuracy.
  *
- * @param {string} text
+ * @param {string}  text
+ * @param {boolean} isQuery - true for search queries, false for documents
  * @returns {Promise<number[]>}
  */
-const embed = async (text) => {
-  const dims = 512;
+const embed = async (text, isQuery = false) => {
+  try {
+    const pipe = await getEmbeddingPipeline();
+
+    // BGE models use instruction prefix for queries (improves retrieval ~5-10%)
+    const input = isQuery ? `Represent this medical query: ${text}` : text;
+
+    const output = await pipe(input, {
+      pooling:   'cls',   // BGE uses CLS token pooling (not mean)
+      normalize: true,
+    });
+
+    return Array.from(output.data);
+
+  } catch (err) {
+    logger.error('Embedding error — falling back to pseudo-embedding:', err.message);
+    return pseudoEmbed(text);
+  }
+};
+
+/**
+ * Fallback only — NOT suitable for production RAG.
+ * Dims match BGE-M3 (1024) to keep ChromaDB collection consistent.
+ */
+const pseudoEmbed = (text) => {
+  const dims = 1024;
   const vec = new Array(dims).fill(0);
   const normalized = text.toLowerCase().trim();
-
   for (let i = 0; i < normalized.length; i++) {
     const code = normalized.charCodeAt(i);
     vec[i % dims] = (vec[i % dims] + code * 0.001) % 1;
   }
-
   const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0)) || 1;
   return vec.map((v) => v / mag);
 };
