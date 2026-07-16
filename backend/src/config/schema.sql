@@ -10,9 +10,17 @@ CREATE TABLE IF NOT EXISTS users (
   email         VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   role          VARCHAR(20) NOT NULL DEFAULT 'user',  -- 'user' | 'admin'
+  is_verified   BOOLEAN NOT NULL DEFAULT FALSE,        -- email confirmed via OTP
+  otp_code      VARCHAR(6),                            -- current registration OTP
+  otp_expires_at TIMESTAMPTZ,                          -- OTP expiry timestamp
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- For existing databases, ensure the email-verification columns exist.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified    BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code       VARCHAR(6);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMPTZ;
 
 -- ─── MEDICAL SESSIONS ────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS medical_sessions (

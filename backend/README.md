@@ -1,7 +1,11 @@
-# MedAI Backend 🏥 — Groq / Llama Edition
+# MedAI Backend 🏥
 
 > AI-powered medical symptom checker — Node.js/Express REST API  
-> Uses **Llama 3 via Groq** + RAG (ChromaDB) + PostgreSQL + Redis
+> AI logic (LLM agents + RAG) runs in a separate **Python AI service** (`/ai-service`).
+> Backend stack: Express + PostgreSQL + Redis. AI stack: FastAPI + DeepSeek + ChromaDB.
+
+> **Note:** The backend no longer contains any AI logic. It calls the Python AI
+> service over HTTP (`AI_SERVICE_URL`). See [`../ai-service/README.md`](../ai-service/README.md).
 
 ---
 
@@ -21,18 +25,13 @@ medai-backend/
 │   ├── app.js                     # Express app & middleware
 │   │
 │   ├── config/
-│   │   ├── index.js               # Config from env vars (Groq settings here)
+│   │   ├── index.js               # Config from env vars (AI_SERVICE_URL here)
 │   │   ├── database.js            # PostgreSQL pool
 │   │   ├── redis.js               # Redis helpers
 │   │   └── schema.sql             # DB schema
 │   │
 │   ├── ai/
-│   │   ├── claudeClient.js        # ← Groq/Llama client (renamed kept for compatibility)
-│   │   ├── prompts.js             # System prompts tuned for Llama 3
-│   │   └── orchestrator.js        # 6-agent pipeline
-│   │
-│   ├── rag/
-│   │   └── ragService.js          # ChromaDB + static fallback context
+│   │   └── orchestrator.js        # Thin HTTP client → Python AI service
 │   │
 │   ├── middleware/
 │   │   ├── auth.js                # JWT verify + requireAdmin
@@ -51,8 +50,7 @@ medai-backend/
 │   │   └── reportService.js
 │   │
 │   └── utils/
-│       ├── logger.js
-│       └── seedMedical.js         # Seeds ChromaDB with medical docs
+│       └── logger.js
 │
 ├── .env.example
 ├── docker-compose.yml
@@ -68,26 +66,28 @@ medai-backend/
 
 ```bash
 # 1. Enter folder
-cd medai-backend
+cd backend
 
-# 2. Copy env and add your Groq key
+# 2. Copy env files
 cp .env.example .env
-nano .env   # → set GROQ_API_KEY=gsk_xxxxxxxxxxxx
+cp ../ai-service/.env.example ../ai-service/.env
+# → set DEEPSEEK_API_KEY in ../ai-service/.env
 
-# 3. Start all services
+# 3. Start all services (backend + Python AI service + DB/Redis/Chroma)
 docker-compose up -d
 
-# 4. Seed medical knowledge into ChromaDB
-docker-compose exec api node src/utils/seedMedical.js
+# 4. Seed medical knowledge into ChromaDB (via the AI service)
+docker-compose exec ai-service python -m app.seed
 
-# API running at http://localhost:4000
+# API running at http://localhost:4000  •  AI service at http://localhost:8001
 ```
 
 ### Option B — Local Dev
 
 ```bash
+# --- Backend (Node) ---
 npm install
-cp .env.example .env     # → fill GROQ_API_KEY
+cp .env.example .env     # → set AI_SERVICE_URL (default http://localhost:8001)
 
 # Start Postgres, Redis, ChromaDB (via Docker or locally)
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=medai_pass postgres:16-alpine
@@ -97,41 +97,36 @@ docker run -d -p 8000:8000 chromadb/chroma
 # Init DB schema
 psql $DATABASE_URL -f src/config/schema.sql
 
-# Seed medical docs
-node src/utils/seedMedical.js
+# --- AI service (Python) — in a separate terminal ---
+cd ../ai-service
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env      # → set DEEPSEEK_API_KEY
+uvicorn app.main:app --port 8001
 
-# Start server
+# Seed medical docs (from anywhere)
+curl -X POST http://localhost:8001/seed   # or: npm run seed (from backend)
+
+# --- Start backend server ---
 npm run dev
-```
 
 ---
 
 ## 🔑 Environment Variables
 
-| Variable        | Required | Description                                        |
-|-----------------|----------|----------------------------------------------------|
-| `GROQ_API_KEY`  | ✅        | Your Groq API key (`gsk_...`)                      |
-| `GROQ_MODEL`    | ✅        | Model to use (default: `llama3-70b-8192`)          |
-| `DATABASE_URL`  | ✅        | PostgreSQL connection string                       |
-| `JWT_SECRET`    | ✅        | Secret for JWT signing (min 32 chars)              |
-| `REDIS_URL`     | ⬜        | Redis URL — caching degrades gracefully if missing |
-| `CHROMA_URL`    | ⬜        | ChromaDB URL — has static fallback if missing      |
-| `PORT`          | ⬜        | HTTP port (default: 4000)                          |
-| `FRONTEND_URL`  | ⬜        | CORS origin (default: http://localhost:3000)       |
+| Variable                | Required | Description                                        |
+|-------------------------|----------|----------------------------------------------------|
+| `AI_SERVICE_URL`        | ✅        | URL of the Python AI service (default `http://localhost:8001`) |
+| `AI_SERVICE_TIMEOUT_MS` | ⬜        | Request timeout for the AI service (default 120000)|
+| `DATABASE_URL`          | ✅        | PostgreSQL connection string                       |
+| `JWT_SECRET`            | ✅        | Secret for JWT signing (min 32 chars)              |
+| `REDIS_URL`             | ⬜        | Redis URL — caching degrades gracefully if missing |
+| `PORT`                  | ⬜        | HTTP port (default: 4000)                          |
+| `FRONTEND_URL`          | ⬜        | CORS origin (default: http://localhost:3000)       |
 
-### Available Groq / Llama Models
-
-| Model                     | Context | Best for               |
-|---------------------------|---------|------------------------|
-| `llama3-70b-8192`         | 8K      | ✅ Best quality (default) |
-| `llama3-8b-8192`          | 8K      | Faster / cheaper       |
-| `mixtral-8x7b-32768`      | 32K     | Long conversations     |
-| `gemma2-9b-it`            | 8K      | Lightweight alternative|
-
-Set in `.env`:
-```
-GROQ_MODEL=llama3-70b-8192
-```
+> LLM/model and ChromaDB configuration now live in the **AI service**
+> (`DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL`, `CHROMA_URL`, …). See
+> [`../ai-service/.env.example`](../ai-service/.env.example).
 
 ---
 
@@ -160,13 +155,13 @@ GROQ_MODEL=llama3-70b-8192
 
 ---
 
-### Chat (AI — Llama powered)
+### Chat (AI — Python service powered)
 
-| Method | Endpoint                       | Auth | Description              |
-|--------|--------------------------------|------|--------------------------|
-| POST   | `/api/chat/session`            | ✅    | Start new session        |
-| POST   | `/api/chat/message`            | ✅    | Send message to Llama AI |
-| GET    | `/api/chat/history/:sessionId` | ✅    | Get conversation history |
+| Method | Endpoint                       | Auth | Description                    |
+|--------|--------------------------------|------|--------------------------------|
+| POST   | `/api/chat/session`            | ✅    | Start new session              |
+| POST   | `/api/chat/message`            | ✅    | Send message → Python AI service |
+| GET    | `/api/chat/history/:sessionId` | ✅    | Get conversation history       |
 
 **Send message:**
 ```json
@@ -238,7 +233,10 @@ UPDATE users SET role='admin' WHERE email='admin@example.com';
 
 ---
 
-## 🤖 Multi-Agent AI Pipeline (Llama 3)
+## 🤖 Multi-Agent AI Pipeline (Python service)
+
+> Implemented in `/ai-service` (FastAPI + DeepSeek). The backend reaches it via
+> `POST {AI_SERVICE_URL}/process`.
 
 ```
 User Message
@@ -279,15 +277,16 @@ User Message
 
 ## 🩺 RAG Medical Knowledge
 
-ChromaDB stores embeddings from:
+Handled by the Python AI service (ChromaDB + BGE-M3 embeddings + BM25 hybrid search).
+Knowledge sources:
 - **WHO** — Global disease guidelines
 - **CDC** — Disease database
 - **Mayo Clinic** — Clinical descriptions
 - **MedlinePlus** — Patient encyclopedia
 
-Seed: `node src/utils/seedMedical.js`
+Seed: `npm run seed` (calls the AI service), or `python -m app.seed` inside `/ai-service`.
 
-If ChromaDB is unavailable, the system falls back to built-in static context for common symptoms.
+If ChromaDB is unavailable, the AI service falls back to built-in static context for common symptoms.
 
 ---
 

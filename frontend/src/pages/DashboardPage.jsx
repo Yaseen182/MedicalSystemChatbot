@@ -7,6 +7,7 @@ const DashboardPage = ({ user, setPage }) => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedSession, setSelectedSession] = useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -107,7 +108,7 @@ const DashboardPage = ({ user, setPage }) => {
                     <td style={{ color: "var(--text-1)" }}>{s.topCondition || "—"}</td>
                     <td><span className={`badge ${riskBadge(s.riskLevel)}`}>{(s.riskLevel || "low").toUpperCase()}</span></td>
                     <td><span className={`badge ${s.status === "flagged" ? "badge-red" : "badge-green"}`}>{s.status}</span></td>
-                    <td><button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 12px" }}>View Report</button></td>
+                    <td><button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 12px" }} onClick={() => setSelectedSession(s)}>View Report</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -134,6 +135,101 @@ const DashboardPage = ({ user, setPage }) => {
           )}
         </div>
       </div>
+
+      {/* REPORT POPUP */}
+      {selectedSession && (
+        <div
+          onClick={() => setSelectedSession(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="glass"
+            style={{ borderRadius: "var(--radius-lg)", maxWidth: 560, width: "100%", maxHeight: "85vh", overflowY: "auto", border: "1px solid var(--border)" }}
+          >
+            {/* Modal header */}
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: "var(--cyan-dim)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Icon name="file" size={18} color="var(--cyan)" />
+                </div>
+                <div>
+                  <h3 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 16 }}>Medical Report</h3>
+                  <p style={{ fontSize: 12, color: "var(--text-3)" }}>
+                    {selectedSession.date ? new Date(selectedSession.date).toLocaleString() : "—"}
+                  </p>
+                </div>
+              </div>
+              <button className="btn btn-ghost" style={{ padding: "6px 10px" }} onClick={() => setSelectedSession(null)}>
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div style={{ padding: "24px" }}>
+              {/* Risk level */}
+              <div style={{ marginBottom: 22 }}>
+                <div style={{ fontSize: 11, color: "var(--text-3)", letterSpacing: "0.08em", fontFamily: "var(--font-display)", marginBottom: 8, textTransform: "uppercase" }}>Risk Level</div>
+                <span className={`badge ${riskBadge(selectedSession.riskLevel)}`}>{(selectedSession.riskLevel || "low").toUpperCase()}</span>
+              </div>
+
+              {/* Symptoms */}
+              {(selectedSession.symptoms || []).length > 0 && (
+                <div style={{ marginBottom: 22 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-3)", letterSpacing: "0.08em", fontFamily: "var(--font-display)", marginBottom: 10, textTransform: "uppercase" }}>Symptoms</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {selectedSession.symptoms.map((sym) => (
+                      <span key={sym} style={{ fontSize: 12, padding: "4px 12px", background: "var(--cyan-dim)", borderRadius: 99, color: "var(--cyan)" }}>{sym}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Diagnoses */}
+              {(selectedSession.diagnoses || []).length > 0 && (
+                <div style={{ marginBottom: 22 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-3)", letterSpacing: "0.08em", fontFamily: "var(--font-display)", marginBottom: 12, textTransform: "uppercase" }}>Possible Conditions</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {[...selectedSession.diagnoses]
+                      .sort((a, b) => (b.probability || 0) - (a.probability || 0))
+                      .map((d, i) => (
+                        <div key={i} style={{ padding: "12px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", borderRadius: "var(--radius)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                          <span style={{ fontSize: 13, color: "var(--text-1)", fontWeight: 500 }}>{d.disease}</span>
+                          {d.probability != null && (
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--amber)", whiteSpace: "nowrap" }}>{d.probability}%</span>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recommendation */}
+              {selectedSession.summary && (
+                <div style={{ marginBottom: 22 }}>
+                  <div style={{ fontSize: 11, color: "var(--green)", letterSpacing: "0.08em", fontFamily: "var(--font-display)", marginBottom: 10, textTransform: "uppercase" }}>Recommendation</div>
+                  <div style={{ padding: "14px 16px", background: "rgba(0,255,136,0.05)", border: "1px solid rgba(0,255,136,0.15)", borderRadius: "var(--radius)", fontSize: 13, color: "var(--text-2)", lineHeight: 1.7 }}>
+                    {selectedSession.summary}
+                  </div>
+                </div>
+              )}
+
+              {(selectedSession.diagnoses || []).length === 0 &&
+                (selectedSession.symptoms || []).length === 0 &&
+                !selectedSession.summary && (
+                  <p style={{ color: "var(--text-3)", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+                    This session has no analysis results yet.
+                  </p>
+              )}
+
+              {/* Disclaimer */}
+              <div style={{ padding: "10px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: "var(--radius)", fontSize: 11, color: "var(--text-3)", fontStyle: "italic", lineHeight: 1.6 }}>
+                ⓘ This is not a medical diagnosis. Please consult a healthcare professional.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

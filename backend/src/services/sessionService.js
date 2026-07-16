@@ -6,8 +6,29 @@ const SESSION_TTL = 60 * 60 * 6; // 6 hours in Redis
 // ── Conversation history (Redis) ─────────────────────────────
 
 const getHistory = async (sessionId) => {
+  // Redis is the fast path / cache.
   const cached = await get(`session:${sessionId}:history`);
-  return cached || [];
+  if (cached && cached.length > 0) return cached;
+
+  // Fallback to PostgreSQL (source of truth) so context survives even when
+  // Redis is unavailable. Rehydrate the cache for subsequent reads.
+  const result = await query(
+    'SELECT role, content, metadata, created_at FROM conversation_messages WHERE session_id = $1 ORDER BY created_at ASC',
+    [sessionId]
+  );
+
+  const history = result.rows.map((row) => ({
+    role: row.role,
+    content: row.content,
+    metadata: row.metadata || {},
+    timestamp: row.created_at,
+  }));
+
+  if (history.length > 0) {
+    await set(`session:${sessionId}:history`, history, SESSION_TTL);
+  }
+
+  return history;
 };
 
 const appendMessage = async (sessionId, role, content, metadata = {}) => {
@@ -56,21 +77,47 @@ const completeSession = async (sessionId, riskLevel = 'low', summary = '') => {
 };
 
 const getUserSessions = async (userId, limit = 20, offset = 0) => {
+  // Only return sessions that actually have content (at least one message).
+  // This excludes empty sessions that were created but never used.
   const result = await query(
     `SELECT ms.*, 
-       COALESCE(json_agg(s.name) FILTER (WHERE s.id IS NOT NULL), '[]') AS symptoms,
+       COALESCE(json_agg(DISTINCT s.name) FILTER (WHERE s.id IS NOT NULL), '[]') AS symptoms,
        COALESCE(json_agg(json_build_object('disease', d.disease, 'probability', d.probability)) 
          FILTER (WHERE d.id IS NOT NULL), '[]') AS diagnoses
      FROM medical_sessions ms
      LEFT JOIN symptoms s ON s.session_id = ms.id
      LEFT JOIN diagnoses d ON d.session_id = ms.id
      WHERE ms.user_id = $1
+       AND (
+         ms.status = 'complete'
+         OR EXISTS (SELECT 1 FROM symptoms s WHERE s.session_id = ms.id)
+       )
      GROUP BY ms.id
      ORDER BY ms.started_at DESC
      LIMIT $2 OFFSET $3`,
     [userId, limit, offset]
   );
-  return result.rows;
+
+  // Map DB rows → the shape the frontend expects.
+  return result.rows.map((row) => {
+    const diagnoses = row.diagnoses || [];
+    const topCondition = diagnoses.length > 0
+      ? [...diagnoses].sort((a, b) => (b.probability || 0) - (a.probability || 0))[0].disease
+      : null;
+
+    return {
+      id:           row.id,
+      date:         row.started_at,
+      startedAt:    row.started_at,
+      endedAt:      row.ended_at,
+      status:       row.status,
+      riskLevel:    row.risk_level || 'low',
+      summary:      row.summary,
+      symptoms:     row.symptoms || [],
+      diagnoses,
+      topCondition,
+    };
+  });
 };
 
 // ── Save symptoms & diagnoses ─────────────────────────────────

@@ -11,12 +11,29 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://medai_user:medai_pass@postgres:5432/medai_db
       - REDIS_URL=redis://redis:6379
-      - CHROMA_URL=http://chromadb:8000
+      - AI_SERVICE_URL=http://ai-service:8001
     env_file:
       - .env
     depends_on:
       - postgres
       - redis
+      - ai-service
+    restart: unless-stopped
+    networks:
+      - medai-net
+
+  # ── Python AI Service (LLM agents + RAG) ───────────────────
+  ai-service:
+    build: ../ai-service
+    container_name: medai-ai
+    ports:
+      - "8001:8001"
+    environment:
+      - AI_SERVICE_PORT=8001
+      - CHROMA_URL=http://chromadb:8000
+    env_file:
+      - ../ai-service/.env
+    depends_on:
       - chromadb
     restart: unless-stopped
     networks:

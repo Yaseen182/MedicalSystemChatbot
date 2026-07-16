@@ -153,7 +153,12 @@ Admin:
 - **Node.js** - Runtime
 - **PostgreSQL** - Database
 - **Redis** - Caching
-- **Claude API** - AI engine
+
+### AI Service (Python)
+- **FastAPI** - AI microservice framework
+- **DeepSeek** - LLM engine (OpenAI-compatible)
+- **ChromaDB + BGE-M3** - Hybrid RAG (semantic + BM25)
+- Runs the 6-agent medical pipeline; the backend calls it over HTTP
 
 ---
 

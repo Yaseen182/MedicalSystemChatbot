@@ -2,10 +2,26 @@
 
 ## 📂 هيكل المشروع
 
+
+
+
+ ai/ uvicorn app.main:app --host 0.0.0.0 --port 8001
+backend / 
+
+
+docker start medai-postgres
+npm run dev
+
+front/
+npm run dev
+
+
+
+
 ```
 MedAI/
 │
-├── backend/                          # 🔗 الخادم (معد مسبقاً)
+├── backend/                          # 🔗 الخادم (Node.js / Express)
 │   ├── src/
 │   │   ├── app.js
 │   │   ├── server.js
@@ -14,8 +30,22 @@ MedAI/
 │   │   ├── services/
 │   │   ├── middleware/
 │   │   ├── ai/
+│   │   │   └── orchestrator.js       # عميل HTTP رفيع → خدمة الـ AI بالبايثون
 │   │   └── utils/
 │   └── package.json
+│
+├── ai-service/                       # 🧠 خدمة الذكاء الاصطناعي (Python / FastAPI)
+│   ├── app/
+│   │   ├── main.py                   # نقاط النهاية: /process, /rag/query, /seed, /health
+│   │   ├── config.py
+│   │   ├── llm_client.py             # عميل DeepSeek + تضمينات BGE-M3
+│   │   ├── prompts.py                # برومبتات الوكلاء الستة
+│   │   ├── rag_service.py            # ChromaDB + BM25 + RRF
+│   │   ├── orchestrator.py           # خط أنابيب الوكلاء الستة
+│   │   └── seed.py                   # تعبئة قاعدة المعرفة الطبية
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── .env.example
 │
 ├── frontend/                         # ✅ تم ربطه بنجاح
 │   ├── src/
@@ -122,14 +152,11 @@ MedAI/
 ## 🔌 الاتصالات (Connections)
 
 ```
-Frontend (3000) ←→ Backend (4000)
-   ↓                    ↓
-localStorage    PostgreSQL (5432)
-                   ↓
+Frontend (3000) ←→ Backend (4000) ←→ AI Service (8001 · Python)
+   ↓                    ↓                    ↓
+localStorage    PostgreSQL (5432)     DeepSeek API
+                   ↓                   ChromaDB (8000)
               Redis (6379) [optional]
-                   ↓
-              External APIs
-              (Claude, etc)
 ```
 
 ---

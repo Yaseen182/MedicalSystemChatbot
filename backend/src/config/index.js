@@ -17,14 +17,17 @@ const config = {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
   },
 
-  deepseek: {
-    apiKey: process.env.DEEPSEEK_API_KEY,
-    model:  process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+  // Resend transactional email (used for register OTP verification).
+  resend: {
+    apiKey:    process.env.RESEND_API_KEY || 're_ftuf6b4d_CQw6A9m5MsUqWBBSPDcW3fF2',
+    fromEmail: process.env.RESEND_FROM_EMAIL || 'MedAI <onboarding@resend.dev>',
+    otpTtlMin: parseInt(process.env.OTP_TTL_MINUTES) || 10,
   },
 
-  chroma: {
-    url:        process.env.CHROMA_URL || 'http://localhost:8000',
-    collection: process.env.CHROMA_COLLECTION || 'medai_knowledge',
+  // AI logic now lives in the Python AI microservice (see /ai-service).
+  aiService: {
+    url:       process.env.AI_SERVICE_URL || 'http://localhost:8001',
+    timeoutMs: parseInt(process.env.AI_SERVICE_TIMEOUT_MS) || 120000,
   },
 
   rateLimit: {

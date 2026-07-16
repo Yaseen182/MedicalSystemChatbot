@@ -12,7 +12,6 @@ import LandingPage   from "./pages/LandingPage";
 import AuthPage      from "./pages/AuthPage";
 import ChatPage      from "./pages/ChatPage";
 import DashboardPage from "./pages/DashboardPage";
-import HistoryPage   from "./pages/HistoryPage";
 import ReportsPage   from "./pages/ReportsPage";
 import AdminPage     from "./pages/AdminPage";
 
@@ -94,11 +93,10 @@ export default function App() {
         {page === "register"  && <AuthPage mode="register" setPage={setPage} onAuth={handleAuth} />}
         {page === "chat"      && user && <ChatPage user={user} />}
         {page === "dashboard" && user && <DashboardPage user={user} setPage={setPage} />}
-        {page === "history"   && user && <HistoryPage />}
         {page === "reports"   && user && <ReportsPage />}
         {page === "admin"     && user?.role === "admin" && <AdminPage />}
 
-        {user && !["chat","dashboard","history","reports","admin","landing","login","register"].includes(page) && (
+        {user && !["chat","dashboard","reports","admin","landing","login","register"].includes(page) && (
           <div style={{ paddingTop: 64, paddingLeft: 240, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ textAlign: "center" }}>
               <p style={{ color: "var(--text-3)", fontSize: 14 }}>Page not found</p>

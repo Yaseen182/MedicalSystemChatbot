@@ -4,7 +4,6 @@ const Sidebar = ({ page, setPage, isAdmin }) => {
   const links = [
     { id: "chat",      label: "New Consultation", icon: "chat"    },
     { id: "dashboard", label: "Dashboard",         icon: "chart"   },
-    { id: "history",   label: "History",           icon: "clock"   },
     { id: "reports",   label: "Reports",           icon: "file"    },
     ...(isAdmin ? [{ id: "admin", label: "Admin Panel", icon: "settings" }] : []),
   ];

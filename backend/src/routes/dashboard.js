@@ -13,7 +13,13 @@ router.get('/stats', async (req, res, next) => {
     const userId = req.user.id;
 
     const [sessionsRes, symptomsRes, highRiskRes, reportsRes] = await Promise.all([
-      query('SELECT COUNT(*) FROM medical_sessions WHERE user_id=$1', [userId]),
+      // Count only non-empty sessions (those with at least one message).
+      query(
+        `SELECT COUNT(*) FROM medical_sessions ms
+         WHERE ms.user_id=$1
+           AND (ms.status = 'complete' OR EXISTS (SELECT 1 FROM symptoms s WHERE s.session_id = ms.id))`,
+        [userId]
+      ),
       query('SELECT COUNT(*) FROM symptoms s JOIN medical_sessions ms ON ms.id=s.session_id WHERE ms.user_id=$1', [userId]),
       query("SELECT COUNT(*) FROM medical_sessions WHERE user_id=$1 AND risk_level='high'", [userId]),
       query('SELECT COUNT(*) FROM medical_reports WHERE user_id=$1', [userId]),

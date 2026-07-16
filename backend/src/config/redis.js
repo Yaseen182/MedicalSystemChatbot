@@ -7,15 +7,22 @@ let client = null;
 const getClient = async () => {
   if (client && client.isOpen) return client;
 
-  client = redis.createClient({ url: config.redis.url });
+  client = redis.createClient({
+    url: config.redis.url,
+    socket: {
+      // Stop reconnecting after the first failure so we don't spam the logs.
+      reconnectStrategy: false,
+      connectTimeout: 3000,
+    },
+  });
 
-  client.on('error', (err) => logger.warn('Redis error (non-fatal):', err.message));
+  client.on('error', () => {}); // suppress per-attempt noise; failure logged once below
   client.on('connect', () => logger.info('Redis connected'));
 
   try {
     await client.connect();
   } catch (err) {
-    logger.warn('Redis unavailable — caching disabled:', err.message);
+    logger.warn(`Redis unavailable — caching disabled (${err.message})`);
     client = null;
   }
 

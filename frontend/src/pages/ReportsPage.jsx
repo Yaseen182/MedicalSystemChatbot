@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { jsPDF } from "jspdf";
 import Icon from "../components/Icon";
 import { reportsAPI } from "../utils/api";
 
@@ -9,6 +10,8 @@ const ReportsPage = () => {
   const [expandedReport, setExpandedReport] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [reportDetails, setReportDetails] = useState({});
+  const [shareMsg, setShareMsg] = useState(null);
+  const [shareMenu, setShareMenu] = useState(null);
 
   useEffect(() => {
     const fetchReports = async () => {
@@ -83,6 +86,171 @@ const ReportsPage = () => {
   const getReportRisk = (report, details) => {
     const content = resolveReportContent(details || report);
     return content?.riskLevel || content?.risk || report?.riskLevel || report?.risk || 'low';
+  };
+
+  // Risk-based color theme for the expanded report card.
+  const riskTheme = (risk) => {
+    switch (risk) {
+      case 'high':
+        return { bg: 'rgba(255,69,96,0.08)', border: 'var(--red)', header: 'rgba(255,69,96,0.12)' };
+      case 'medium':
+        return { bg: 'rgba(255,193,7,0.08)', border: 'var(--amber)', header: 'rgba(255,193,7,0.12)' };
+      default:
+        return { bg: 'rgba(76,175,80,0.08)', border: 'var(--green)', header: 'rgba(76,175,80,0.12)' };
+    }
+  };
+
+  // Build a plain-text version of the report for download / share.
+  const buildReportText = (report, details) => {
+    const content = resolveReportContent(details || report);
+    const lines = [];
+    lines.push('MedAI — Medical Report');
+    lines.push('========================');
+    const date = report.date ? new Date(report.date).toLocaleString() : new Date().toLocaleString();
+    lines.push(`Date: ${date}`);
+    lines.push(`Risk Level: ${(getReportRisk(report, details) || 'low').toUpperCase()}`);
+    lines.push('');
+
+    if (Array.isArray(content?.symptoms) && content.symptoms.length > 0) {
+      lines.push('Symptoms:');
+      content.symptoms.forEach((s) => lines.push(`  - ${typeof s === 'string' ? s : JSON.stringify(s)}`));
+      lines.push('');
+    }
+
+    if (Array.isArray(content?.diagnoses) && content.diagnoses.length > 0) {
+      lines.push('Possible Conditions:');
+      content.diagnoses.forEach((d) => {
+        const o = typeof d === 'string' ? { disease: d } : d;
+        lines.push(`  - ${o.disease || o.name || 'Condition'}${o.probability != null ? ` (${o.probability}%)` : ''}`);
+        if (o.reasoning) lines.push(`      ${o.reasoning}`);
+      });
+      lines.push('');
+    }
+
+    const recommendation = content?.recommendation || content?.recommendations;
+    if (recommendation) {
+      lines.push('Recommendation:');
+      lines.push(`  ${recommendation}`);
+      lines.push('');
+    }
+
+    lines.push(content?.disclaimer || 'This is not a medical diagnosis. Please consult a healthcare professional.');
+    return lines.join('\n');
+  };
+
+  // Generate and download a real PDF of the report using jsPDF.
+  const handleDownload = (report, details) => {
+    const content = resolveReportContent(details || report);
+    const risk = (getReportRisk(report, details) || 'low').toUpperCase();
+    const date = report.date ? new Date(report.date).toLocaleString() : new Date().toLocaleString();
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 48;
+    const maxWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const ensureSpace = (needed) => {
+      if (y + needed > pageHeight - margin) {
+        doc.addPage();
+        y = margin;
+      }
+    };
+
+    const writeLines = (text, { size = 11, color = [40, 40, 40], gap = 6, bold = false } = {}) => {
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setFontSize(size);
+      doc.setTextColor(color[0], color[1], color[2]);
+      const lines = doc.splitTextToSize(String(text), maxWidth);
+      lines.forEach((line) => {
+        ensureSpace(size + gap);
+        doc.text(line, margin, y);
+        y += size + gap;
+      });
+    };
+
+    const sectionTitle = (text) => {
+      y += 8;
+      writeLines(text, { size: 12, color: [0, 120, 160], bold: true, gap: 8 });
+    };
+
+    // Header
+    writeLines('MedAI — Medical Report', { size: 20, color: [10, 30, 50], bold: true, gap: 10 });
+    writeLines(`Date: ${date}`, { size: 10, color: [110, 110, 110], gap: 4 });
+
+    const riskColor = risk === 'HIGH' ? [200, 30, 45] : risk === 'MEDIUM' ? [200, 150, 0] : [40, 150, 70];
+    writeLines(`Risk Level: ${risk}`, { size: 11, color: riskColor, bold: true, gap: 6 });
+
+    // Divider
+    ensureSpace(16);
+    doc.setDrawColor(220, 220, 220);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 14;
+
+    if (Array.isArray(content?.symptoms) && content.symptoms.length > 0) {
+      sectionTitle('Symptoms');
+      content.symptoms.forEach((s) =>
+        writeLines(`•  ${typeof s === 'string' ? s : JSON.stringify(s)}`, { gap: 5 })
+      );
+    }
+
+    if (Array.isArray(content?.diagnoses) && content.diagnoses.length > 0) {
+      sectionTitle('Possible Conditions');
+      content.diagnoses.forEach((d) => {
+        const o = typeof d === 'string' ? { disease: d } : d;
+        writeLines(
+          `•  ${o.disease || o.name || 'Condition'}${o.probability != null ? `  (${o.probability}%)` : ''}`,
+          { bold: true, gap: 4 }
+        );
+        if (o.reasoning) writeLines(`     ${o.reasoning}`, { size: 10, color: [90, 90, 90], gap: 6 });
+      });
+    }
+
+    const recommendation = content?.recommendation || content?.recommendations;
+    if (recommendation) {
+      sectionTitle('Recommendation');
+      writeLines(recommendation, { gap: 6 });
+    }
+
+    y += 10;
+    writeLines(
+      content?.disclaimer || 'This is not a medical diagnosis. Please consult a healthcare professional.',
+      { size: 9, color: [140, 140, 140], gap: 4 }
+    );
+
+    doc.save(`medai-report-${(report.id || Date.now()).toString().slice(0, 8)}.pdf`);
+  };
+
+  // Always open our own options menu — the native share sheet is unreliable on
+  // desktop browsers (it can fail with "couldn't show you all the ways…").
+  const handleShare = (report) => {
+    setShareMenu((cur) => (cur === report.id ? null : report.id));
+  };
+
+  const shareVia = async (method, report, details) => {
+    const text = buildReportText(report, details);
+    const subject = 'MedAI Medical Report';
+    if (method === 'copy') {
+      try {
+        await navigator.clipboard.writeText(text);
+        setShareMsg(report.id);
+        setTimeout(() => setShareMsg((cur) => (cur === report.id ? null : cur)), 2000);
+      } catch (err) {
+        console.error('Copy failed', err);
+      }
+    } else if (method === 'email') {
+      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+    } else if (method === 'whatsapp') {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    } else if (method === 'native' && navigator.share) {
+      try {
+        await navigator.share({ title: subject, text });
+      } catch (err) {
+        if (err?.name !== 'AbortError') console.error('Native share failed', err);
+      }
+    }
+    setShareMenu(null);
   };
 
   const formatValue = (value) => {
@@ -334,11 +502,12 @@ const ReportsPage = () => {
             const details = reportDetails[r.id];
             const title = getReportTitle(r, details);
             const badgeRisk = getReportRisk(r, details);
+            const theme = riskTheme(badgeRisk);
 
             return (
-              <div key={r.id} className="glass" style={{ borderRadius: "var(--radius-lg)", overflow: "hidden", border: isExpanded ? "1px solid var(--cyan)" : "1px solid var(--border)", transition: "all 0.3s ease" }}>
+              <div key={r.id} className="glass" style={{ borderRadius: "var(--radius-lg)", overflow: "hidden", border: isExpanded ? `1px solid ${theme.border}` : "1px solid var(--border)", background: isExpanded ? theme.bg : undefined, transition: "all 0.3s ease" }}>
                 {/* Header */}
-                <div style={{ padding: "20px 24px", background: isExpanded ? "rgba(0,229,255,0.04)" : "transparent", borderBottom: isExpanded ? "1px solid var(--border)" : "none", cursor: "pointer", userSelect: "none", transition: "all 0.2s ease" }} onClick={() => expandReport(r)}>
+                <div style={{ padding: "20px 24px", background: isExpanded ? theme.header : "transparent", borderBottom: isExpanded ? `1px solid ${theme.border}` : "none", cursor: "pointer", userSelect: "none", transition: "all 0.2s ease" }} onClick={() => expandReport(r)}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1 }}>
                       <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--cyan-dim)", border: "1px solid var(--border-h)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -456,12 +625,27 @@ const ReportsPage = () => {
                     )}
 
                     <div style={{ display: "flex", gap: 8, marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
-                      <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 16px", flex: 1 }} onClick={() => window.open(r.downloadUrl || r.url || `/api/dashboard/reports/${r.id}/download`, '_blank')}>
-                        <Icon name="file" size={13} /> Download
+                      <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 16px", flex: 1 }} onClick={() => handleDownload(r, details)}>
+                        <Icon name="file" size={13} /> Download PDF
                       </button>
-                      <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 16px", flex: 1 }}>
-                        <Icon name="mail" size={13} /> Share
-                      </button>
+                      <div style={{ position: "relative", flex: 1 }}>
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 16px", width: "100%" }} onClick={() => handleShare(r, details)}>
+                          <Icon name={shareMsg === r.id ? "check" : "mail"} size={13} /> {shareMsg === r.id ? "Copied!" : "Share"}
+                        </button>
+                        {shareMenu === r.id && (
+                          <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0, background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", boxShadow: "0 8px 24px rgba(0,0,0,0.35)", overflow: "hidden", zIndex: 10 }}>
+                            {[
+                              { id: "copy",     label: "Copy to clipboard", icon: "file" },
+                              { id: "email",    label: "Email",             icon: "mail" },
+                              { id: "whatsapp", label: "WhatsApp",          icon: "chat" },
+                            ].map((opt) => (
+                              <button key={opt.id} className="btn btn-ghost" style={{ fontSize: 12, padding: "10px 14px", width: "100%", justifyContent: "flex-start", borderRadius: 0 }} onClick={() => shareVia(opt.id, r, details)}>
+                                <Icon name={opt.icon} size={13} /> {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

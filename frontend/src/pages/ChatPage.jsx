@@ -21,25 +21,15 @@ const ChatPage = ({ user }) => {
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
-  // Create session on component mount
+  // Show the welcome message immediately. The actual session is created lazily
+  // on the first message so we don't create empty sessions on every page visit.
   useEffect(() => {
-    const initSession = async () => {
-      try {
-        const res = await chatAPI.createSession();
-        const newSessionId = res.data.session.id;
-        setSessionId(newSessionId);
-        setMessages([{ 
-          id: 1, 
-          role: "ai", 
-          text: INITIAL_MESSAGE, 
-          time: new Date() 
-        }]);
-      } catch (err) {
-        setError("Failed to create chat session");
-        console.error(err);
-      }
-    };
-    initSession();
+    setMessages([{
+      id: 1,
+      role: "ai",
+      text: INITIAL_MESSAGE,
+      time: new Date()
+    }]);
   }, []);
 
   useEffect(() => {
@@ -48,7 +38,7 @@ const ChatPage = ({ user }) => {
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || !sessionId || isTyping) return;
+    if (!text || isTyping) return;
     setInput("");
 
     const userMsg = { id: Date.now(), role: "user", text, time: new Date() };
@@ -56,7 +46,15 @@ const ChatPage = ({ user }) => {
 
     setIsTyping(true);
     try {
-      const res = await chatAPI.sendMessage(sessionId, text);
+      // Lazily create the session on the first message only.
+      let activeSessionId = sessionId;
+      if (!activeSessionId) {
+        const sessionRes = await chatAPI.createSession();
+        activeSessionId = sessionRes.data.session.id;
+        setSessionId(activeSessionId);
+      }
+
+      const res = await chatAPI.sendMessage(activeSessionId, text);
       const { message, type, diagnoses: newDiagnoses, extractedSymptoms, isComplete } = res.data;
 
       // Check for emergency
@@ -101,28 +99,22 @@ const ChatPage = ({ user }) => {
     } 
   };
 
-  const resetChat = async () => {
-    try {
-      const res = await chatAPI.createSession();
-      const newSessionId = res.data.session.id;
-      setSessionId(newSessionId);
-      setMessages([{ 
-        id: 1, 
-        role: "ai", 
-        text: INITIAL_MESSAGE, 
-        time: new Date() 
-      }]);
-      setInput(""); 
-      setIsTyping(false); 
-      setEmergency(false);
-      setSymptoms([]); 
-      setDiagnoses(null);
-      setPhase("chat");
-      setError(null);
-    } catch (err) {
-      setError("Failed to start new session");
-      console.error(err);
-    }
+  const resetChat = () => {
+    // Reset locally; a fresh session is created lazily on the next message.
+    setSessionId(null);
+    setMessages([{
+      id: 1,
+      role: "ai",
+      text: INITIAL_MESSAGE,
+      time: new Date()
+    }]);
+    setInput("");
+    setIsTyping(false);
+    setEmergency(false);
+    setSymptoms([]);
+    setDiagnoses(null);
+    setPhase("chat");
+    setError(null);
   };
 
   return (
