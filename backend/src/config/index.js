@@ -19,7 +19,7 @@ const config = {
 
   // Resend transactional email (used for register OTP verification).
   resend: {
-    apiKey:    process.env.RESEND_API_KEY || 're_ftuf6b4d_CQw6A9m5MsUqWBBSPDcW3fF2',
+    apiKey:    process.env.RESEND_API_KEY || '',
     fromEmail: process.env.RESEND_FROM_EMAIL || 'MedAI <onboarding@resend.dev>',
     otpTtlMin: parseInt(process.env.OTP_TTL_MINUTES) || 10,
   },
